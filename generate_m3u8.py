@@ -1,8 +1,14 @@
+# -*- coding: UTF-8 -*-
+"""
+@Project  : GenM3u8
+@File     : generate_m3u8.py
+@Author   : Sorami
+@GitHub   : https://github.com/Soramik
+"""
+
 import os
 import subprocess
 import time
-import datetime
-import traceback
 import shutil
 import random
 import logging as log
@@ -21,15 +27,17 @@ class GenM3u8:
     _output_folder_path = None        # 输出的文件夹路径
     _output_m3u8_file_name = None     # 输出的m3u8文件
 
-    def __init__(self, hls_time: int = 180):
+    def __init__(self, hls_time: int = 180, print_ffmpeg_flag=False):
         """
         GenM3u8类初始化
         :param hls_time: 每个分段视频的时间长度(单位：秒)
+        :param print_ffmpeg_flag: 是否打印ffmpeg编译信息
         """
         self.hls_time = hls_time
         self.random_str = ''.join(random.sample("zyxwvutsrqponmlkjihgfedcba9876543210", 8))
         self._TEMP_KEYINFO_PATH = os.path.join(prj_path, f'enc_{self.random_str}.keyinfo')  # 临时keyinfo文件
         self._TEMP_ENC_PATH = os.path.join(prj_path, f'encrypt_{self.random_str}.key')  # 临时enc文件
+        self._print_ffmpeg_flag = print_ffmpeg_flag
 
     def set(self, input_video_file_path, encrypt_url, **kwargs):
         """
@@ -65,15 +73,15 @@ class GenM3u8:
         if not os.path.exists(self._output_folder_path):
             os.mkdir(self._output_folder_path)
         # 生成加密文件
-        # self._genEncrypt()
+        self._genEncrypt()
         # 生成视频
-        # self._genVideo()
+        self._genVideo()
         # 把目标存储的url嵌入m3u8中
         self._genNewM3u8()
         # 把enc文件移动到指定输出目录下
-        # shutil.move(self._TEMP_ENC_PATH, os.path.join(self._output_folder_path, "encrypt.key"))
+        shutil.move(self._TEMP_ENC_PATH, os.path.join(self._output_folder_path, "encrypt.key"))
         # 删除临时的keyinfo文件
-        # os.remove(self._TEMP_KEYINFO_PATH)
+        os.remove(self._TEMP_KEYINFO_PATH)
 
     @staticmethod
     def __runcmd(command):
@@ -83,23 +91,28 @@ class GenM3u8:
         :return:
         """
         ret = subprocess.run(command, shell=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             # stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              timeout=3
                              )
         return ret
 
-    @staticmethod
-    def __runcmd_wait(cmd):
+    def __runcmd_wait(self, cmd):
         """
         运行cmd命令
         :param cmd:
         :return:
         """
-        p = subprocess.Popen(cmd, shell=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             close_fds=True
-                             )
+        if self._print_ffmpeg_flag:
+            p = subprocess.Popen(cmd, shell=True,
+                                 close_fds=True
+                                 )
+        else:
+            p = subprocess.Popen(cmd, shell=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 close_fds=True
+                                 )
         p.communicate()
+        returncode = p.returncode
         # 清理内存
         if p.stdin:
             p.stdin.close()
@@ -111,6 +124,7 @@ class GenM3u8:
             p.kill()    # 杀死子进程，清理内存
         except OSError:
             pass
+        return returncode
 
     @staticmethod
     def __genIV():
@@ -192,9 +206,13 @@ class GenM3u8:
                   f"{output_m3u8_file_path}"
 
         log.info(f"开始【{os.path.basename(self._input_video_file_path)}】的编码...")
-        # log.info(gen_cmd)
-        self.__runcmd_wait(gen_cmd)   # 运行
-        log.info(f"完成【{os.path.basename(self._input_video_file_path)}】的编码...")
+        returncode = self.__runcmd_wait(gen_cmd)   # 运行
+        if returncode == 0:
+            log.info(f"完成【{os.path.basename(self._input_video_file_path)}】的编码...")
+            return
+        else:
+            log.info(f"【{os.path.basename(self._input_video_file_path)}】的编码失败")
+            raise Exception(f"【{os.path.basename(self._input_video_file_path)}】的编码失败")
 
     def _genNewM3u8(self):
         """
@@ -213,19 +231,8 @@ class GenM3u8:
             lines = rf.readlines()
             for line in lines:
                 if ".part" in line:
-                    line = self._storage_url + "/" + line
+                    line = self._storage_url + line
                 w_lines.append(line)
         with open(m3u8_path, "w", encoding="utf-8") as wf:
             wf.writelines(w_lines)
         log.info(f"完成对【{self._output_m3u8_file_name}】嵌入url...")
-
-
-if __name__ == "__main__":
-    enc_url = "http://127.0.0.1:55244/d/Local/"
-    input_video_file_p = os.path.abspath("./[SP26].mp4")
-
-    gg = GenM3u8()
-    gg.set(
-        encrypt_url=enc_url, input_video_file_path=input_video_file_p, storage_url="http://127.0.0.1:55244/d/Local/test"
-    )
-    gg.start()
